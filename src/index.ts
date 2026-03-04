@@ -8,47 +8,28 @@ import { setTimeout as sleep } from "timers/promises";
 
 const BASE_URL = process.env.PINCHTAB_URL || "http://localhost:9867";
 
-// Auto-start state: only run the health check / spawn logic once per process.
 let started = false;
 
-/**
- * Ensure the Pinchtab server is running.
- *
- * 1. If the /health endpoint responds with `status: "ok"` we return immediately.
- * 2. Otherwise we spawn the `pinchtab` binary as a detached background process
- *    and poll /health every 500 ms for up to 15 seconds.
- * 3. On success we log to stderr so the caller can see it started.
- * 4. On timeout we throw a descriptive error with install instructions.
- */
 async function ensureRunning(): Promise<void> {
-  // Quick health check helper — returns true when the server is up.
   async function isHealthy(): Promise<boolean> {
     try {
       const res = await fetch(`${BASE_URL}/health`, {
-        method: "GET",
         signal: AbortSignal.timeout(2000),
       });
       if (!res.ok) return false;
-      const body = await res.json() as { status?: string };
+      const body = (await res.json()) as { status?: string };
       return body.status === "ok";
     } catch {
       return false;
     }
   }
 
-  // Already running — nothing to do.
   if (await isHealthy()) return;
 
-  // Resolve the binary: honour user override, then fall back to PATH.
   const bin = process.env.PINCHTAB_BIN || "pinchtab";
-
-  const child = spawn(bin, [], {
-    detached: true,
-    stdio: "ignore",
-  });
+  const child = spawn(bin, [], { detached: true, stdio: "ignore" });
   child.unref();
 
-  // Poll until healthy or timeout.
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     await sleep(500);
@@ -63,7 +44,6 @@ async function ensureRunning(): Promise<void> {
   );
 }
 
-// Helper to make HTTP requests to pinchtab
 async function pinchtab(
   path: string,
   options: {
@@ -72,7 +52,6 @@ async function pinchtab(
     query?: Record<string, string>;
   } = {}
 ): Promise<unknown> {
-  // Auto-start: run the health check / spawn logic on the very first call only.
   if (!started) {
     started = true;
     await ensureRunning();
@@ -117,13 +96,7 @@ function fail(error: unknown) {
   return { isError: true as const, content: [{ type: "text" as const, text: msg }] };
 }
 
-// Create MCP server
-const server = new McpServer({
-  name: "pinchtab",
-  version: "1.0.0",
-});
-
-// ── Navigate ────────────────────────────────────────────────────────
+const server = new McpServer({ name: "pinchtab", version: "1.0.0" });
 
 server.tool(
   "navigate",
@@ -135,15 +108,9 @@ server.tool(
   async ({ url, newTab }) => {
     try {
       if (newTab) {
-        await pinchtab("/tab", {
-          method: "POST",
-          body: { action: "new", url },
-        });
+        await pinchtab("/tab", { method: "POST", body: { action: "new", url } });
       } else {
-        await pinchtab("/navigate", {
-          method: "POST",
-          body: { url },
-        });
+        await pinchtab("/navigate", { method: "POST", body: { url } });
       }
       return ok(`Navigated to ${url}`);
     } catch (e) {
@@ -152,13 +119,11 @@ server.tool(
   }
 );
 
-// ── Snapshot (Accessibility Tree) ───────────────────────────────────
-
 server.tool(
   "snapshot",
-  "Get accessibility tree snapshot of the page. Returns element refs (e0, e1, ...) for interaction. Very token-efficient.",
+  "Get accessibility tree snapshot of the page. Returns element refs (e0, e1, ...) for interaction.",
   {
-    interactive: z.boolean().optional().describe("Only show interactive elements (buttons, inputs, links)"),
+    interactive: z.boolean().optional().describe("Only show interactive elements"),
     compact: z.boolean().optional().describe("Compact format to reduce tokens"),
   },
   async ({ interactive, compact }) => {
@@ -166,23 +131,19 @@ server.tool(
       const query: Record<string, string> = {};
       if (interactive) query.interactive = "true";
       if (compact) query.compact = "true";
-
       const result = await pinchtab("/snapshot", { query });
-      const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-      return ok(text);
+      return ok(typeof result === "string" ? result : JSON.stringify(result, null, 2));
     } catch (e) {
       return fail(e);
     }
   }
 );
 
-// ── Click ───────────────────────────────────────────────────────────
-
 server.tool(
   "click",
-  "Click an element by reference ID (e.g., 'e5'). Use snapshot first to find refs.",
+  "Click an element by ref (e.g. 'e5'). Use snapshot to find refs.",
   {
-    ref: z.string().describe("Element reference from snapshot (e.g., 'e5')"),
+    ref: z.string().describe("Element ref from snapshot (e.g. 'e5')"),
     human: z.boolean().optional().describe("Human-like click with random delays"),
   },
   async ({ ref, human }) => {
@@ -198,13 +159,11 @@ server.tool(
   }
 );
 
-// ── Type ────────────────────────────────────────────────────────────
-
 server.tool(
   "type_text",
   "Type text character by character. Use 'fill' for instant input.",
   {
-    ref: z.string().describe("Element reference (e.g., 'e5')"),
+    ref: z.string().describe("Element ref (e.g. 'e5')"),
     text: z.string().describe("Text to type"),
     human: z.boolean().optional().describe("Human-like typing with random delays"),
   },
@@ -221,13 +180,11 @@ server.tool(
   }
 );
 
-// ── Fill ────────────────────────────────────────────────────────────
-
 server.tool(
   "fill",
-  "Instantly fill a form field (clears existing value). Faster than type_text.",
+  "Instantly fill a form field (clears existing value).",
   {
-    ref: z.string().describe("Element reference (e.g., 'e5')"),
+    ref: z.string().describe("Element ref (e.g. 'e5')"),
     value: z.string().describe("Value to fill"),
   },
   async ({ ref, value }) => {
@@ -243,13 +200,11 @@ server.tool(
   }
 );
 
-// ── Press Key ───────────────────────────────────────────────────────
-
 server.tool(
   "press",
   "Press a keyboard key (Enter, Tab, Escape, ArrowDown, etc.)",
   {
-    key: z.string().describe("Key to press (e.g., 'Enter', 'Tab', 'Escape')"),
+    key: z.string().describe("Key to press (e.g. 'Enter', 'Tab')"),
     ref: z.string().optional().describe("Element to focus before pressing"),
   },
   async ({ key, ref }) => {
@@ -264,13 +219,11 @@ server.tool(
   }
 );
 
-// ── Select ──────────────────────────────────────────────────────────
-
 server.tool(
   "select",
-  "Select an option from a dropdown/select element.",
+  "Select an option from a dropdown.",
   {
-    ref: z.string().describe("Select element reference"),
+    ref: z.string().describe("Select element ref"),
     value: z.string().describe("Option value to select"),
   },
   async ({ ref, value }) => {
@@ -286,8 +239,6 @@ server.tool(
   }
 );
 
-// ── Scroll ──────────────────────────────────────────────────────────
-
 server.tool(
   "scroll",
   "Scroll the page or a specific element.",
@@ -300,7 +251,6 @@ server.tool(
     const px = amount || 500;
     const x = direction === "left" ? -px : direction === "right" ? px : 0;
     const y = direction === "up" ? -px : direction === "down" ? px : 0;
-
     try {
       const body: Record<string, unknown> = { kind: "scroll", x, y };
       if (ref) body.ref = ref;
@@ -312,13 +262,11 @@ server.tool(
   }
 );
 
-// ── Hover ───────────────────────────────────────────────────────────
-
 server.tool(
   "hover",
-  "Hover over an element to trigger hover states or tooltips.",
+  "Hover over an element.",
   {
-    ref: z.string().describe("Element reference (e.g., 'e5')"),
+    ref: z.string().describe("Element ref (e.g. 'e5')"),
   },
   async ({ ref }) => {
     try {
@@ -333,11 +281,9 @@ server.tool(
   }
 );
 
-// ── Get Text ────────────────────────────────────────────────────────
-
 server.tool(
   "get_text",
-  "Extract text content of the current page. ~800 tokens per page.",
+  "Extract text content of the current page.",
   {},
   async () => {
     try {
@@ -349,15 +295,13 @@ server.tool(
   }
 );
 
-// ── Screenshot ──────────────────────────────────────────────────────
-
 server.tool(
   "screenshot",
-  "Take a screenshot (base64 JPEG). Use snapshot instead when possible — much more token-efficient.",
+  "Take a screenshot (base64 JPEG). Prefer snapshot for lower token cost.",
   {},
   async () => {
     try {
-      const result = await pinchtab("/screenshot") as { base64: string; format?: string };
+      const result = (await pinchtab("/screenshot")) as { base64: string; format?: string };
       const mimeType = result.format === "png" ? "image/png" : "image/jpeg";
       return {
         content: [{ type: "image" as const, data: result.base64, mimeType }],
@@ -367,8 +311,6 @@ server.tool(
     }
   }
 );
-
-// ── Evaluate JavaScript ─────────────────────────────────────────────
 
 server.tool(
   "evaluate",
@@ -382,29 +324,21 @@ server.tool(
         method: "POST",
         body: { expression },
       });
-      const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-      return ok(text);
+      return ok(typeof result === "string" ? result : JSON.stringify(result, null, 2));
     } catch (e) {
       return fail(e);
     }
   }
 );
 
-// ── Tab Management ──────────────────────────────────────────────────
-
-server.tool(
-  "list_tabs",
-  "List all open browser tabs.",
-  {},
-  async () => {
-    try {
-      const result = await pinchtab("/tabs");
-      return ok(JSON.stringify(result, null, 2));
-    } catch (e) {
-      return fail(e);
-    }
+server.tool("list_tabs", "List all open browser tabs.", {}, async () => {
+  try {
+    const result = await pinchtab("/tabs");
+    return ok(JSON.stringify(result, null, 2));
+  } catch (e) {
+    return fail(e);
   }
-);
+});
 
 server.tool(
   "close_tab",
@@ -424,47 +358,26 @@ server.tool(
   }
 );
 
-// ── Cookies ─────────────────────────────────────────────────────────
-
-server.tool(
-  "get_cookies",
-  "Get all cookies for the current page.",
-  {},
-  async () => {
-    try {
-      const result = await pinchtab("/cookies");
-      return ok(JSON.stringify(result, null, 2));
-    } catch (e) {
-      return fail(e);
-    }
+server.tool("get_cookies", "Get all cookies for the current page.", {}, async () => {
+  try {
+    const result = await pinchtab("/cookies");
+    return ok(JSON.stringify(result, null, 2));
+  } catch (e) {
+    return fail(e);
   }
-);
+});
 
-// ── Health Check ────────────────────────────────────────────────────
-
-server.tool(
-  "health",
-  "Check if Pinchtab server is running.",
-  {},
-  async () => {
-    try {
-      const result = await pinchtab("/health");
-      return ok(`Pinchtab healthy: ${JSON.stringify(result)}`);
-    } catch (e) {
-      return fail(e);
-    }
+server.tool("health", "Check if Pinchtab server is running.", {}, async () => {
+  try {
+    const result = await pinchtab("/health");
+    return ok(JSON.stringify(result));
+  } catch (e) {
+    return fail(e);
   }
-);
+});
 
-// ── Start Server ────────────────────────────────────────────────────
-
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Pinchtab MCP server started (stdio)");
-}
-
-main().catch((error) => {
-  console.error("Failed to start Pinchtab MCP server:", error);
+const transport = new StdioServerTransport();
+server.connect(transport).catch((e) => {
+  console.error(e);
   process.exit(1);
 });
