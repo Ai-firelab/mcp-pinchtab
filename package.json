@@ -1,0 +1,46 @@
+{
+  "name": "@aifirelab/mcp-pinchtab",
+  "version": "1.0.0",
+  "description": "MCP server for Pinchtab — browser automation for AI agents",
+  "type": "module",
+  "bin": {
+    "mcp-pinchtab": "./build/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "build",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "pinchtab",
+    "browser",
+    "automation",
+    "ai",
+    "claude",
+    "model-context-protocol"
+  ],
+  "author": "AI FireLab <dev@aifirelab.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ai-firelab/mcp-pinchtab.git"
+  },
+  "homepage": "https://github.com/Ai-firelab/mcp-pinchtab#readme",
+  "bugs": {
+    "url": "https://github.com/Ai-firelab/mcp-pinchtab/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  }
+}
